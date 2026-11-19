@@ -1,4 +1,3 @@
-
 import { createContext, useContext, useState, useEffect } from 'react';
 import {
   login as loginService,
@@ -6,6 +5,7 @@ import {
   getCurrentUser,
   getToken,
 } from '../services/authService';
+import { api, saveUser, clearTokens } from '../lib/apiClient';
 
 const AuthContext = createContext(null);
 
@@ -16,18 +16,37 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const token = getToken();
     const storedUser = getCurrentUser();
-    if (token && storedUser) setUser(storedUser);
-    setLoading(false);
+    if (token && storedUser) {
+      setUser(storedUser);
+      setLoading(false);
+      api.get('/auth/me')
+        .then((data) => {
+          if (data?.user) {
+            setUser(data.user);
+            saveUser(data.user);
+          }
+        })
+        .catch(() => {});
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   const login = async (staffId, password, selectedRole) => {
-    const { user } = await loginService(staffId, password, selectedRole);
-    setUser(user);
-    return user;
+    const { user: u } = await loginService(staffId, password);
+    if (selectedRole && u.role !== selectedRole) {
+      clearTokens();
+      localStorage.removeItem('jajacare_user');
+      throw new Error(
+        `These credentials belong to a ${u.role}. Please select the ${u.role} tab to continue.`
+      );
+    }
+    setUser(u);
+    return u;
   };
 
-  const logout = () => {
-    logoutService();
+  const logout = async () => {
+    await logoutService();
     setUser(null);
   };
 

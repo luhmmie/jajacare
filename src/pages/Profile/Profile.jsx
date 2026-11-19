@@ -1,16 +1,19 @@
-// src/pages/Profile/Profile.jsx
 import { useState } from 'react';
-import { 
-  FiUser, FiLock, FiSave, FiCheckCircle, 
+import {
+  FiUser, FiLock, FiSave, FiCheckCircle,
   FiShield, FiMail, FiPhone, FiBriefcase,
   FiCalendar, FiKey
 } from 'react-icons/fi';
 import { useAuth } from '../../hooks/useAuth';
 import { ROLE_LABELS } from '../../constants/roles';
+import { useNotification } from '../../context/NotificationContext';
+import { updateMyProfile, updateMyPassword } from '../../services/userService';
+import { saveUser } from '../../lib/apiClient';
 
 export default function Profile() {
   const { user } = useAuth();
-  
+  const { notifySuccess, notifyError } = useNotification();
+
   const [profileForm, setProfileForm] = useState({
     name: user?.name || '',
     email: user?.email || '',
@@ -24,34 +27,62 @@ export default function Profile() {
   });
 
   const [saved, setSaved] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
 
-  const handleSaveProfile = (e) => {
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
-    // In real app: await updateProfile(profileForm)
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    if (savingProfile) return;
+    setSavingProfile(true);
+    try {
+      const updated = await updateMyProfile(profileForm);
+      saveUser(updated);
+      notifySuccess('Profile updated');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      notifyError(err.message || 'Failed to update profile');
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
-  const handleChangePassword = (e) => {
+  const handleChangePassword = async (e) => {
     e.preventDefault();
-    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      alert('Passwords do not match.');
+    if (savingPassword) return;
+    if (!passwordForm.currentPassword || !passwordForm.newPassword) {
+      notifyError('Please fill in both password fields');
       return;
     }
-    // In real app: await changePassword(...)
-    alert('Password updated successfully.');
-    setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      notifyError('Passwords do not match');
+      return;
+    }
+    if (passwordForm.newPassword.length < 6) {
+      notifyError('New password must be at least 6 characters');
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      await updateMyPassword(passwordForm.currentPassword, passwordForm.newPassword);
+      notifySuccess('Password updated');
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      notifyError(err.message || 'Failed to change password');
+    } finally {
+      setSavingPassword(false);
+    }
   };
 
   const roleLabel = ROLE_LABELS[user?.role] || user?.role || 'Staff';
-  const initials = user?.name?.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || '??';
+  const initials = user?.name
+    ? user.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase()
+    : '??';
 
   return (
     <div className="max-w-[1400px] mx-auto pb-10 space-y-6">
-      
-      {/* SUCCESS TOAST */}
       {saved && (
-        <div className="fixed top-6 right-6 z-50 bg-white border-l-4 border-green-500 rounded-lg shadow-2xl p-4 animate-in slide-in-from-right-8">
+        <div className="fixed top-6 right-6 z-50 bg-white border-l-4 border-green-500 rounded-lg shadow-2xl p-4">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-green-100 text-green-600 flex items-center justify-center">
               <FiCheckCircle size={16} />
@@ -64,10 +95,9 @@ export default function Profile() {
         </div>
       )}
 
-      {/* HEADER */}
       <div>
         <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
-          <span>Dashboard</span> <span className="text-gray-300">/</span> 
+          <span>Dashboard</span> <span className="text-gray-300">/</span>
           <span className="font-semibold text-[#14357A]">My Profile</span>
         </div>
         <h1 className="text-3xl font-bold text-[#14357A] mb-1">My Profile</h1>
@@ -75,24 +105,22 @@ export default function Profile() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* ─── Profile Card (Sidebar) ─── */}
         <div className="lg:col-span-1">
           <div className="bg-[#14357A] text-white p-6 rounded-xl shadow-lg relative overflow-hidden sticky top-24">
             <div className="absolute top-0 right-0 bg-[#F5B041] text-[#0A192F] text-[9px] font-bold px-3 py-1 rounded-bl-lg">
               Active Session
             </div>
-            
+
             <div className="flex flex-col items-center text-center mt-4">
               <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#F5B041] to-[#D9A520] text-[#0A192F] flex items-center justify-center text-3xl font-bold border-4 border-white/20 mb-4">
                 {initials}
               </div>
-              
+
               <h2 className="font-bold text-lg">{user?.name || 'Staff Member'}</h2>
               <p className="text-xs text-blue-200 mb-1">{roleLabel}</p>
               <p className="text-[10px] text-blue-300">UI Health Services</p>
-              
-              <div className="w-full mt-6 space-y-2 text-left">
+
+              <div className="w-full mt-6 space-y-3 text-left">
                 <div className="flex items-start gap-2 text-[11px]">
                   <FiBriefcase className="text-blue-300 mt-0.5 shrink-0" size={12} />
                   <div>
@@ -102,7 +130,7 @@ export default function Profile() {
                 </div>
                 <div className="flex items-start gap-2 text-[11px]">
                   <FiMail className="text-blue-300 mt-0.5 shrink-0" size={12} />
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-blue-300 text-[9px] uppercase font-bold">Email</p>
                     <p className="font-semibold truncate">{user?.email || 'N/A'}</p>
                   </div>
@@ -114,155 +142,164 @@ export default function Profile() {
                     <p className="font-semibold">{user?.phone || 'N/A'}</p>
                   </div>
                 </div>
+                {user?.licenseNumber && (
+                  <div className="flex items-start gap-2 text-[11px]">
+                    <FiShield className="text-blue-300 mt-0.5 shrink-0" size={12} />
+                    <div>
+                      <p className="text-blue-300 text-[9px] uppercase font-bold">License</p>
+                      <p className="font-semibold">{user.licenseNumber}</p>
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-start gap-2 text-[11px]">
-                  <FiShield className="text-blue-300 mt-0.5 shrink-0" size={12} />
+                  <FiCalendar className="text-blue-300 mt-0.5 shrink-0" size={12} />
                   <div>
-                    <p className="text-blue-300 text-[9px] uppercase font-bold">2FA Status</p>
-                    <p className="font-semibold flex items-center gap-1 text-green-300">
-                      <FiCheckCircle size={10} /> Enabled
+                    <p className="text-blue-300 text-[9px] uppercase font-bold">Joined</p>
+                    <p className="font-semibold">
+                      {user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
                     </p>
                   </div>
+                </div>
+              </div>
+
+              <div className="w-full mt-6 pt-4 border-t border-white/10">
+                <div className="flex items-center justify-center gap-1 text-[10px] text-blue-200">
+                  <span className="w-1.5 h-1.5 bg-green-400 rounded-full"></span>
+                  Session Active
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* ─── Edit Forms ─── */}
-        <div className="lg:col-span-2 space-y-4">
-          
-          {/* Personal Info */}
-          <form onSubmit={handleSaveProfile} className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-            <h3 className="font-bold text-[#14357A] mb-4 flex items-center gap-2">
-              <FiUser /> Personal Information
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="lg:col-span-2 space-y-6">
+          <form onSubmit={handleSaveProfile} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+            <div className="flex items-center gap-3 mb-6 border-b border-gray-100 pb-4">
+              <div className="bg-blue-50 text-[#14357A] p-2 rounded-lg"><FiUser size={20} /></div>
               <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Full Name</label>
-                <input 
-                  type="text" 
-                  value={profileForm.name}
-                  onChange={(e) => setProfileForm({...profileForm, name: e.target.value})}
-                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-gray-200 rounded-md text-sm outline-none focus:border-[#14357A]" 
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Staff ID</label>
-                <input 
-                  type="text" 
-                  value={user?.staffId || 'N/A'}
-                  readOnly
-                  className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-md text-sm text-gray-500 outline-none" 
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Email Address</label>
-                <input 
-                  type="email" 
-                  value={profileForm.email}
-                  onChange={(e) => setProfileForm({...profileForm, email: e.target.value})}
-                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-gray-200 rounded-md text-sm outline-none focus:border-[#14357A]" 
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Phone Number</label>
-                <input 
-                  type="tel" 
-                  value={profileForm.phone}
-                  onChange={(e) => setProfileForm({...profileForm, phone: e.target.value})}
-                  className="w-full px-3 py-2 bg-[#F8FAFC] border border-gray-200 rounded-md text-sm outline-none focus:border-[#14357A]" 
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Role</label>
-                <input 
-                  type="text" 
-                  value={roleLabel}
-                  readOnly
-                  className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-md text-sm text-gray-500 outline-none" 
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Department</label>
-                <input 
-                  type="text" 
-                  value="UI Health Services"
-                  readOnly
-                  className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded-md text-sm text-gray-500 outline-none" 
-                />
+                <h2 className="font-bold text-[#14357A]">Personal Information</h2>
+                <p className="text-xs text-gray-500">Update your name, email, and phone number.</p>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-gray-100">
-              <button type="button" className="px-4 py-2 text-xs font-bold text-gray-600 bg-[#F8FAFC] border border-gray-200 rounded-md hover:bg-gray-100">
-                Cancel
-              </button>
-              <button type="submit" className="px-6 py-2 text-xs font-bold text-white bg-[#14357A] rounded-md hover:bg-[#0C2356] flex items-center gap-2">
-                <FiSave /> Save Changes
-              </button>
-            </div>
-          </form>
-
-          {/* Change Password */}
-          <form onSubmit={handleChangePassword} className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-            <h3 className="font-bold text-[#14357A] mb-1 flex items-center gap-2">
-              <FiLock /> Change Password
-            </h3>
-            <p className="text-xs text-gray-500 mb-4">Use a strong passphrase of at least 12 characters.</p>
-            
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Current Password</label>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Full Name *</label>
                 <div className="relative">
-                  <FiKey className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-                  <input 
-                    type="password" 
-                    value={passwordForm.currentPassword}
-                    onChange={(e) => setPasswordForm({...passwordForm, currentPassword: e.target.value})}
-                    placeholder="••••••••"
-                    className="w-full pl-9 pr-3 py-2 bg-[#F8FAFC] border border-gray-200 rounded-md text-sm outline-none focus:border-[#14357A]" 
+                  <FiUser className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    required
+                    value={profileForm.name}
+                    onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2.5 bg-[#F8FAFC] border border-gray-200 rounded-md focus:border-[#14357A] outline-none transition"
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">New Password</label>
-                  <input 
-                    type="password" 
-                    value={passwordForm.newPassword}
-                    onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})}
-                    placeholder="••••••••"
-                    className="w-full px-3 py-2 bg-[#F8FAFC] border border-gray-200 rounded-md text-sm outline-none focus:border-[#14357A]" 
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Email Address *</label>
+                <div className="relative">
+                  <FiMail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="email"
+                    required
+                    value={profileForm.email}
+                    onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2.5 bg-[#F8FAFC] border border-gray-200 rounded-md focus:border-[#14357A] outline-none transition"
                   />
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Confirm New Password</label>
-                  <input 
-                    type="password" 
-                    value={passwordForm.confirmPassword}
-                    onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
-                    placeholder="••••••••"
-                    className="w-full px-3 py-2 bg-[#F8FAFC] border border-gray-200 rounded-md text-sm outline-none focus:border-[#14357A]" 
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Phone Number</label>
+                <div className="relative">
+                  <FiPhone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="tel"
+                    value={profileForm.phone}
+                    onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2.5 bg-[#F8FAFC] border border-gray-200 rounded-md focus:border-[#14357A] outline-none transition"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-gray-100">
-              <button 
-                type="button" 
-                onClick={() => setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })}
-                className="px-4 py-2 text-xs font-bold text-gray-600 bg-[#F8FAFC] border border-gray-200 rounded-md hover:bg-gray-100"
+            <div className="flex justify-end mt-6 pt-4 border-t border-gray-100">
+              <button
+                type="submit"
+                disabled={savingProfile}
+                className="bg-[#14357A] hover:bg-[#0C2356] text-white font-semibold px-6 py-2.5 rounded-md flex items-center gap-2 transition shadow-sm disabled:opacity-50"
               >
-                Clear
-              </button>
-              <button type="submit" className="px-6 py-2 text-xs font-bold text-white bg-[#14357A] rounded-md hover:bg-[#0C2356] flex items-center gap-2">
-                <FiLock /> Update Password
+                <FiSave /> {savingProfile ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </form>
 
+          <form onSubmit={handleChangePassword} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+            <div className="flex items-center gap-3 mb-6 border-b border-gray-100 pb-4">
+              <div className="bg-red-50 text-red-500 p-2 rounded-lg"><FiLock size={20} /></div>
+              <div>
+                <h2 className="font-bold text-[#14357A]">Security & Password</h2>
+                <p className="text-xs text-gray-500">Change your login password. Passwords must be at least 6 characters.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Current Password *</label>
+                <div className="relative">
+                  <FiLock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="password"
+                    required
+                    value={passwordForm.currentPassword}
+                    onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2.5 bg-[#F8FAFC] border border-gray-200 rounded-md focus:border-[#14357A] outline-none transition"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">New Password *</label>
+                  <div className="relative">
+                    <FiKey className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="password"
+                      required
+                      value={passwordForm.newPassword}
+                      onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                      className="w-full pl-9 pr-3 py-2.5 bg-[#F8FAFC] border border-gray-200 rounded-md focus:border-[#14357A] outline-none transition"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Confirm New Password *</label>
+                  <div className="relative">
+                    <FiKey className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="password"
+                      required
+                      value={passwordForm.confirmPassword}
+                      onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                      className="w-full pl-9 pr-3 py-2.5 bg-[#F8FAFC] border border-gray-200 rounded-md focus:border-[#14357A] outline-none transition"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-100">
+              <p className="text-[10px] text-gray-500 flex items-center gap-1">
+                <FiShield className="text-[#F5B041]" /> Protected by encrypted session
+              </p>
+              <button
+                type="submit"
+                disabled={savingPassword}
+                className="bg-[#14357A] hover:bg-[#0C2356] text-white font-semibold px-6 py-2.5 rounded-md flex items-center gap-2 transition shadow-sm disabled:opacity-50"
+              >
+                <FiLock /> {savingPassword ? 'Updating...' : 'Update Password'}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </div>

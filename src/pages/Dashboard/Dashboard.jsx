@@ -1,4 +1,4 @@
-
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   FiUsers, FiCalendar, FiClock, FiUserPlus,
@@ -12,163 +12,149 @@ import {
 } from 'recharts';
 import { useAuth } from '../../hooks/useAuth';
 import EmptyState from '../../components/common/EmptyState';
-
-
-const chartData = [
-  { name: 'Mon', students: 80, staff: 30 },
-  { name: 'Tue', students: 95, staff: 40 },
-  { name: 'Wed', students: 60, staff: 25 },
-  { name: 'Thu*', students: 70, staff: 50 },
-  { name: 'Fri*', students: 75, staff: 45 },
-  { name: 'Sat*', students: 40, staff: 20 },
-];
-
-const queuePatientsData = [
-  {
-    initials: 'BA',
-    name: 'Babatunde Adeleke',
-    meta: 'Matric: 214567 • Faculty of Science • Mellanby Hall',
-    extraLabel: 'Arrived',
-    extraValue: '08:30 AM',
-    status: 'Waiting',
-    statusColor: 'bg-amber-100 text-amber-700',
-    action: 'Call In',
-    actionStyle: 'bg-[#14357A] text-white hover:bg-[#0C2356]',
-    cardBg: 'bg-gray-50 border-gray-100',
-    avatarBg: 'bg-[#F5B041]/20 text-[#F5B041]',
-  },
-  {
-    initials: 'CO',
-    name: 'Chioma Okonkwo',
-    meta: 'BP: 118/76 mmHg • Matric: 219804 • Faculty of Pharmacy',
-    extraLabel: 'Triage Station',
-    extraValue: 'Nurse Bisi',
-    status: 'In Triage',
-    statusColor: 'bg-blue-100 text-blue-700',
-    action: 'Review Vitals',
-    actionStyle: 'bg-white text-[#14357A] border border-gray-300 hover:bg-gray-50',
-    cardBg: 'bg-blue-50/50 border-blue-100',
-    avatarBg: 'bg-blue-100 text-blue-600',
-  },
-  {
-    initials: 'OB',
-    name: 'Dr. Olumide Bakare',
-    isPriority: true,
-    meta: 'Staff ID: UISS-1092 • Faculty of Arts (Senior Lecturer)',
-    extraLabel: 'Assigned Doctor',
-    extraValue: 'Dr. Eze (You)',
-    status: 'Ready for Consult',
-    statusColor: 'bg-green-100 text-green-700',
-    action: 'Start Session',
-    actionStyle: 'bg-[#F5B041] text-[#14357A] hover:bg-[#e09b2d]',
-    cardBg: 'bg-gray-50 border-gray-100',
-    avatarBg: 'bg-blue-100 text-blue-600',
-  },
-];
-
-const activityData = [
-  { time: '09:14 AM', title: 'Consult Finalized', desc: 'Dr. Eze finalized consult for Folawale Adeyemi (Matric 218432).', dotColor: 'bg-[#14357A]' },
-  { time: '09:02 AM', title: 'Triage Vitals Log', desc: 'Nurse Kemi logged vitals for Emeka Nwosu (BP: 130/85).', dotColor: 'bg-[#D9A520]' },
-  { time: '08:45 AM', title: 'Insurance Verification', desc: 'Records Desk verified health insurance for 14 new students.', dotColor: 'bg-[#10B981]' },
-];
+import { getStats, getWeeklyVisits, getActivity } from '../../services/dashboardService';
+import { getQueue } from '../../services/appointmentService';
+import { getPharmacyQueue } from '../../services/pharmacyService';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  // ─── Role detection ───
   const isNurse = user?.role === 'nurse';
   const isDoctor = user?.role === 'doctor';
   const isAdmin = user?.role === 'admin';
   const isReceptionist = user?.role === 'receptionist';
   const isPharmacist = user?.role === 'pharmacist';
 
-  const DEMO_EMPTY = false;
-  const queuePatients = DEMO_EMPTY ? [] : queuePatientsData;
-  const recentActivity = DEMO_EMPTY ? [] : activityData;
+  const [stats, setStats] = useState(null);
+  const [weekly, setWeekly] = useState([]);
+  const [activity, setActivity] = useState([]);
+  const [queue, setQueue] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    (async () => {
+      try {
+        const [s, w, a] = await Promise.all([
+          getStats(),
+          getWeeklyVisits(),
+          getActivity(5),
+        ]);
+        if (cancelled) return;
+        setStats(s);
+        setWeekly(w?.days || []);
+        setActivity(a?.activity || []);
+
+        if (isPharmacist || isAdmin) {
+          const q = await getPharmacyQueue();
+          if (!cancelled) setQueue((q || []).slice(0, 3));
+        } else if (!isDoctor) {
+          const q = await getQueue();
+          if (!cancelled) setQueue((q || []).slice(0, 3));
+        }
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Failed to load dashboard');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAdmin, isDoctor, isPharmacist]);
 
   const today = new Date().toLocaleDateString('en-GB', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
 
+  const chartData = weekly.map((d) => ({
+    name: new Date(d.date).toLocaleDateString('en-GB', { weekday: 'short' }),
+    students: d.count,
+    staff: 0,
+  }));
 
   const getStatCards = () => {
+    if (!stats) return [];
     if (isNurse) {
       return [
-        { label: 'Patients in Queue', value: '8', icon: <FiUsers />, sub: 'Awaiting triage', trend: '+3 since 08:00' },
-        { label: 'Vitals Recorded', value: '24', icon: <FiHeart />, sub: 'Today', trend: 'On track' },
-        { label: 'Observation Ward', value: '5', icon: <FaBed />, sub: 'Beds occupied', trend: '3 available' },
-        { label: 'Pending Triage', value: '2', icon: <FiThermometer />, sub: 'Urgent cases', trend: 'Priority' },
+        { label: 'Triage Queue', value: String(stats.triageQueue ?? 0), icon: <FiUsers />, sub: 'Awaiting triage', trend: 'Live' },
+        { label: 'Vitals Recorded', value: String(stats.vitalsRecorded ?? 0), icon: <FiHeart />, sub: 'Today', trend: 'On track' },
+        { label: 'Observation Ward', value: String(stats.wardBeds ?? 0), icon: <FaBed />, sub: 'Beds capacity', trend: 'Available' },
+        { label: 'Pending Triage', value: String(stats.pendingTriage ?? 0), icon: <FiThermometer />, sub: 'Urgent cases', trend: 'Priority' },
       ];
     }
     if (isDoctor) {
       return [
-        { label: 'My Patients Today', value: '9', icon: <FiUsers />, sub: 'Assigned to you', trend: '3 waiting' },
-        { label: 'Completed Consults', value: '6', icon: <FiCheckCircle />, sub: 'Today', trend: 'On track' },
-        { label: 'Pending Consultations', value: '3', icon: <FaStethoscope />, sub: 'In queue', trend: 'Room 1 active' },
-        { label: 'Prescriptions Written', value: '14', icon: <FaPills />, sub: 'e-Rx dispatched', trend: '100% TISHIP' },
+        { label: 'My Patients Today', value: String(stats.patientsToday ?? 0), icon: <FiUsers />, sub: 'Assigned to you', trend: 'Live' },
+        { label: 'Completed Consults', value: String(stats.completedConsultations ?? 0), icon: <FiCheckCircle />, sub: 'Today', trend: 'On track' },
+        { label: 'Pending Consultations', value: String(stats.pendingConsultations ?? 0), icon: <FaStethoscope />, sub: 'In queue', trend: 'Live' },
+        { label: 'Prescriptions Written', value: String(stats.prescriptionsWritten ?? 0), icon: <FaPills />, sub: 'e-Rx dispatched', trend: 'Today' },
       ];
     }
     if (isPharmacist) {
       return [
-        { label: 'Pending Rx Queue', value: '18', icon: <FiBox />, sub: 'Dispense requests', trend: '3 urgent' },
-        { label: 'Dispensed Today', value: '47', icon: <FiCheckCircle />, sub: 'Orders completed', trend: 'On track' },
-        { label: 'Low Stock Alerts', value: '4', icon: <FiAlertCircle />, sub: 'Reorder required', trend: 'Action needed' },
-        { label: 'Total Inventory', value: '1,284', icon: <FiActivity />, sub: 'SKUs tracked', trend: 'Stable' },
+        { label: 'Pending Rx Queue', value: String(stats.pendingRx ?? 0), icon: <FiBox />, sub: 'Dispense requests', trend: 'Live' },
+        { label: 'Dispensed Today', value: String(stats.dispensedToday ?? 0), icon: <FiCheckCircle />, sub: 'Orders completed', trend: 'On track' },
+        { label: 'Low Stock Alerts', value: String(stats.lowStock ?? 0), icon: <FiAlertCircle />, sub: 'Reorder required', trend: 'Action needed' },
+        { label: 'Total Inventory', value: String(stats.inventory ?? 0), icon: <FiActivity />, sub: 'SKUs tracked', trend: 'Stable' },
       ];
     }
     if (isAdmin) {
       return [
-        { label: 'Total Patients', value: '142', icon: <FiUsers />, sub: 'Today', trend: '+12% vs yest.' },
-        { label: 'Appointments', value: '48', icon: <FiCalendar />, sub: 'Booked slots', trend: '32 completed' },
-        { label: 'Staff On Duty', value: '27', icon: <FaUserMd />, sub: 'Across 3 shifts', trend: 'Stable' },
-        { label: 'Revenue Today', value: '₦142k', icon: <FiAward />, sub: 'TISHIP + Private', trend: 'Good' },
+        { label: 'Patients Today', value: String(stats.patientsToday ?? 0), icon: <FiUsers />, sub: 'Today', trend: 'Live' },
+        { label: 'Appointments', value: String(stats.appointmentsToday ?? 0), icon: <FiCalendar />, sub: 'Booked slots', trend: 'Today' },
+        { label: 'Staff On Duty', value: String(stats.staffOnDuty ?? 0), icon: <FaUserMd />, sub: 'Active accounts', trend: 'Stable' },
+        { label: 'Pending Consults', value: String(stats.pendingConsultations ?? 0), icon: <FaStethoscope />, sub: 'In queue', trend: 'Live' },
       ];
     }
-    
     return [
-      { label: 'Patients Today', value: '142', icon: <FiUsers />, sub: 'Peak at 09:30', trend: '+12% vs yest.' },
-      { label: 'Appointments', value: '48', icon: <FiCalendar />, sub: '32 completed', trend: '16 remaining' },
-      { label: 'New Registrations', value: '27', icon: <FiUserPlus />, sub: 'Undergrads', trend: 'Today' },
-      { label: 'Pending Consults', value: '9', icon: <FaStethoscope />, sub: 'Est. wait: 18m', trend: 'Rooms 1,2,4 active' },
+      { label: 'Patients Today', value: String(stats.patientsToday ?? 0), icon: <FiUsers />, sub: 'Today', trend: 'Live' },
+      { label: 'Appointments', value: String(stats.appointmentsToday ?? 0), icon: <FiCalendar />, sub: 'Booked slots', trend: 'Today' },
+      { label: 'New Registrations', value: String(stats.newRegistrations ?? 0), icon: <FiUserPlus />, sub: 'Today', trend: 'Today' },
+      { label: 'Pending Consults', value: String(stats.pendingConsultations ?? 0), icon: <FaStethoscope />, sub: 'In queue', trend: 'Live' },
     ];
   };
 
-  
   const getQuickActions = () => {
     if (isNurse) {
       return [
-        { icon: <FiHeart />, title: 'Record Patient Vitals', desc: 'Enter BP, temperature, pulse, SpO2' },
-        { icon: <FaSyringe />, title: 'Administer Medication', desc: 'Log dispensed drugs & injections' },
-        { icon: <FaBed />, title: 'Update Observation Ward', desc: 'Manage ward beds & patient status' },
+        { icon: <FiHeart />, title: 'Record Patient Vitals', desc: 'Enter BP, temperature, pulse, SpO2', to: '/appointments' },
+        { icon: <FaSyringe />, title: 'Confirm Arrival', desc: 'Check in scheduled patients', to: '/appointments' },
+        { icon: <FaBed />, title: 'View Queue', desc: 'See patients waiting for triage', to: '/appointments' },
       ];
     }
     if (isDoctor) {
       return [
-        { icon: <FiActivity />, title: 'Order Lab Test', desc: 'Malaria RDT, Widal & PCV' },
-        { icon: <FiFileText />, title: 'Review Lab Results', desc: 'Check pending pathology reports' },
-        { icon: <FiBox />, title: 'Pharmacy Dispense Voucher', desc: 'Fast e-prescription requisition' },
-        { icon: <FiAward />, title: 'Medical Fitness Certificate', desc: 'Freshers & Sports clearance' },
+        { icon: <FiActivity />, title: 'View Appointments', desc: 'My consultations for today', to: '/appointments' },
+        { icon: <FiFileText />, title: 'My Patients', desc: 'Browse patient records', to: '/patients' },
+        { icon: <FiAward />, title: 'Update Profile', desc: 'Contact & license information', to: '/profile' },
       ];
     }
     if (isPharmacist) {
       return [
-        { icon: <FiBox />, title: 'Dispense Next Rx', desc: 'Process pending prescriptions' },
-        { icon: <FiCheckCircle />, title: 'Verify Prescription', desc: 'Check for drug interactions' },
-        { icon: <FiAlertCircle />, title: 'Reorder Stock', desc: 'Low inventory items' },
+        { icon: <FiBox />, title: 'Dispense Next Rx', desc: 'Process pending prescriptions', to: '/pharmacy' },
+        { icon: <FiCheckCircle />, title: 'View Stock', desc: 'Check current inventory', to: '/pharmacy' },
+        { icon: <FiAlertCircle />, title: 'Reorder Stock', desc: 'Low inventory items', to: '/pharmacy' },
+      ];
+    }
+    if (isAdmin) {
+      return [
+        { icon: <FiUsers />, title: 'Manage Staff', desc: 'Staff directory & access', to: '/settings' },
+        { icon: <FiCalendar />, title: 'View Appointments', desc: 'All bookings today', to: '/appointments' },
+        { icon: <FiUserPlus />, title: 'Register Patient', desc: 'New patient intake', to: '/patients/register' },
       ];
     }
     return [
-      { icon: <FiUserPlus />, title: 'Register New Patient', desc: 'Create a new patient profile' },
-      { icon: <FiCalendar />, title: 'Book Appointment', desc: 'Schedule a new visit' },
-      { icon: <FiActivity />, title: 'Order Lab Test', desc: 'Malaria RDT, Widal & PCV' },
+      { icon: <FiUserPlus />, title: 'Register New Patient', desc: 'Create a new patient profile', to: '/patients/register' },
+      { icon: <FiCalendar />, title: 'Book Appointment', desc: 'Schedule a new visit', to: '/appointments' },
+      { icon: <FiUsers />, title: 'View Patients', desc: 'Browse patient directory', to: '/patients' },
     ];
   };
 
   return (
     <div className="max-w-[1600px] mx-auto space-y-6">
-
-      
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-2">
         <div>
           <h1 className="text-2xl font-bold text-[#0A192F] flex items-center gap-2">
@@ -179,28 +165,17 @@ export default function Dashboard() {
           </h1>
           <p className="text-sm text-gray-500 flex flex-wrap items-center gap-2 mt-1">
             <FiCalendar /> Today is {today}
-            <span className="hidden sm:inline">•</span>
-            <span className="hidden sm:inline font-medium text-[#10B981] flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span>
-              {isNurse ? 'Triage & Vitals Station Active' 
-                : isDoctor ? 'Consulting Room 1 Active' 
-                : isPharmacist ? 'Dispensary Counter Open' 
-                : 'General Outpatient & Emergency Triage Active'}
-            </span>
           </p>
         </div>
         <div className="flex gap-3 w-full md:w-auto">
-          
-          <button 
+          <button
             onClick={() => navigate(isPharmacist ? '/pharmacy' : '/appointments')}
             className="flex-1 md:flex-none bg-white border border-gray-200 text-[#0A192F] font-semibold px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-gray-50 transition shadow-sm"
           >
-            <FiCalendar /> {isNurse ? 'View Queue' : isPharmacist ? 'Pharmacy Queue' : 'View Appointments'}
+            <FiCalendar /> {isPharmacist ? 'Pharmacy Queue' : 'View Appointments'}
           </button>
-          
-        
           {(isAdmin || isReceptionist) && (
-            <button 
+            <button
               onClick={() => navigate('/patients/register')}
               className="flex-1 md:flex-none bg-[#14357A] hover:bg-[#0C2356] text-white font-semibold px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition shadow-sm"
             >
@@ -210,56 +185,46 @@ export default function Dashboard() {
         </div>
       </div>
 
-      
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-lg">{error}</div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        {getStatCards().map((stat, idx) => (
-          <div key={idx} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-            <div className="flex justify-between items-start mb-4">
-              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">{stat.label}</p>
-              <div className="w-8 h-8 rounded-full bg-blue-50 text-[#14357A] flex items-center justify-center">
-                {stat.icon}
+        {loading && !stats ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm h-32 animate-pulse" />
+          ))
+        ) : (
+          getStatCards().map((stat, idx) => (
+            <div key={idx} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+              <div className="flex justify-between items-start mb-4">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">{stat.label}</p>
+                <div className="w-8 h-8 rounded-full bg-blue-50 text-[#14357A] flex items-center justify-center">
+                  {stat.icon}
+                </div>
               </div>
+              <div className="flex items-baseline gap-2 mb-2">
+                <h3 className="text-3xl font-bold text-[#14357A]">{stat.value}</h3>
+              </div>
+              <p className="text-[10px] text-gray-500 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#D9A520]"></span> {stat.sub} • {stat.trend}
+              </p>
             </div>
-            <div className="flex items-baseline gap-2 mb-2">
-              <h3 className="text-3xl font-bold text-[#14357A]">{stat.value}</h3>
-            </div>
-            <p className="text-[10px] text-gray-500 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#D9A520]"></span> {stat.sub} • {stat.trend}
-            </p>
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
-    
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-
-    
         <div className="xl:col-span-2 space-y-6">
-
-          
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
             <div className="flex justify-between items-start mb-6">
               <div>
                 <h3 className="font-bold text-[#14357A] flex items-center gap-2">
-                  <FiActivity /> {isNurse ? 'Triage Volume & Vitals Throughput' 
-                    : isDoctor ? 'My Consultation Throughput' 
-                    : isPharmacist ? 'Dispensing Volume' 
-                    : 'Weekly Patient Visits & Throughput'}
+                  <FiActivity /> {isDoctor ? 'My Consultation Throughput' : isPharmacist ? 'Dispensing Volume' : 'Weekly Patient Visits'}
                 </h3>
                 <p className="text-xs text-gray-500 mt-1">
-                  {isNurse ? 'Patients triaged and vitals recorded per day.'
-                    : isDoctor ? 'Your patient consult volume per day (last 7 days).'
-                    : isPharmacist ? 'Prescriptions processed per day.'
-                    : 'Monday through Saturday outpatient distribution (Students vs. Staff).'}
+                  {isDoctor ? 'Your patient consult volume per day (last 7 days).' : isPharmacist ? 'Prescriptions processed per day.' : 'Outpatient visits over the last 7 days.'}
                 </p>
-              </div>
-              <div className="flex gap-4 text-[10px] font-bold text-gray-600">
-                <div className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-[#14357A]"></span> {isPharmacist ? 'Dispensed' : isDoctor ? 'Consulted' : 'Students'}
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-[#D9A520]"></span> {isPharmacist ? 'Pending' : isDoctor ? 'Pending' : 'Staff'}
-                </div>
               </div>
             </div>
 
@@ -273,39 +238,24 @@ export default function Dashboard() {
                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#6B7280', fontWeight: 600 }} dy={10} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#9CA3AF' }} />
                     <RechartsTooltip cursor={{ fill: '#F3F4F6' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                    <Bar dataKey="students" stackId="a" fill="#14357A" radius={[0, 0, 4, 4]} />
-                    <Bar dataKey="staff" stackId="a" fill="#FDE68A" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="students" fill="#14357A" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
             </div>
-
-            <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-100">
-              <p className="text-[10px] text-gray-400">* Projections based on 4-week moving average</p>
-              <p className="text-[10px] font-bold text-[#14357A] bg-gray-50 px-2 py-1 rounded">
-                {isNurse ? 'Avg Vitals Time: 4m 12s' : isDoctor ? 'Avg Consult Time: 12m 30s' : isPharmacist ? 'Avg Dispense Time: 4m 12s' : 'Clinic Capacity: 84% Available'}
-              </p>
-            </div>
           </div>
 
-          {/* QUEUE */}
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
             <div className="flex justify-between items-center mb-6">
               <div>
                 <h3 className="font-bold text-[#14357A] flex items-center gap-2">
-                  <FiClock /> {isNurse ? 'Triage Queue' 
-                    : isDoctor ? 'My Consultation Queue' 
-                    : isPharmacist ? 'Dispense Queue' 
-                    : 'Live Waiting Queue Preview'}
+                  <FiClock /> {isPharmacist ? 'Dispense Queue' : isDoctor ? 'My Consultation Queue' : 'Live Waiting Queue'}
                 </h3>
                 <p className="text-xs text-gray-500 mt-1">
-                  {isNurse ? 'Patients waiting for vitals and triage.'
-                    : isDoctor ? 'Patients assigned to you and ready for consultation.'
-                    : isPharmacist ? 'Prescriptions waiting to be dispensed.'
-                    : 'Real-time triage and patient routing status.'}
+                  {isPharmacist ? 'Prescriptions waiting to be dispensed.' : 'Patients in the queue right now.'}
                 </p>
               </div>
-              <button 
+              <button
                 onClick={() => navigate(isPharmacist ? '/pharmacy' : '/appointments')}
                 className="text-xs font-bold text-[#14357A] bg-blue-50 px-3 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1 transition"
               >
@@ -313,7 +263,9 @@ export default function Dashboard() {
               </button>
             </div>
 
-            {queuePatients.length === 0 ? (
+            {loading ? (
+              <p className="text-xs text-gray-400 py-6 text-center">Loading queue...</p>
+            ) : queue.length === 0 ? (
               <EmptyState
                 icon={<FiCheckCircle size={24} className="text-green-500" />}
                 title={isPharmacist ? 'No Pending Rx' : 'Queue is clear!'}
@@ -321,60 +273,54 @@ export default function Dashboard() {
               />
             ) : (
               <div className="space-y-3">
-                {queuePatients.map((p, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex flex-col md:flex-row md:items-center justify-between p-4 rounded-lg border gap-4 ${p.cardBg}`}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center shrink-0 ${p.avatarBg}`}>
-                        {p.initials}
+                {queue.map((p, idx) => {
+                  const patientName = isPharmacist
+                    ? `${p.patientId?.firstName || ''} ${p.patientId?.lastName || ''}`.trim()
+                    : `${p.patientId?.firstName || ''} ${p.patientId?.lastName || ''}`.trim();
+                  const meta = p.patientId?.matricNumber || p.patientId?.patientId || '';
+                  const time = p.timeSlot || (p.updatedAt ? new Date(p.updatedAt).toLocaleTimeString() : '');
+                  const initials = (p.patientId?.firstName?.[0] || '') + (p.patientId?.lastName?.[0] || '');
+                  return (
+                    <div key={p.id} className="flex flex-col md:flex-row md:items-center justify-between p-4 rounded-lg border bg-gray-50 border-gray-100 gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full font-bold flex items-center justify-center shrink-0 bg-[#F5B041]/20 text-[#F5B041]">
+                          {initials.toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm text-[#14357A]">{patientName}</p>
+                          <p className="text-[10px] text-gray-500">{meta}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-bold text-sm text-[#14357A]">
-                          {p.name}
-                          {p.isPriority && (
-                            <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded ml-2 uppercase">Priority Staff</span>
-                          )}
-                        </p>
-                        <p className="text-[10px] text-gray-500">{p.meta}</p>
+                      <div className="flex items-center justify-between md:justify-end gap-6 w-full md:w-auto">
+                        <div className="hidden sm:block text-right">
+                          <p className="text-[10px] text-gray-400 uppercase font-bold">Slot</p>
+                          <p className="text-xs font-bold text-[#14357A]">{time}</p>
+                        </div>
+                        <button
+                          onClick={() => navigate(isPharmacist ? '/pharmacy' : '/appointments')}
+                          className="text-xs font-bold px-3 py-2 rounded-md bg-[#14357A] text-white hover:bg-[#0C2356]"
+                        >
+                          Open
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between md:justify-end gap-6 text-right w-full md:w-auto">
-                      <div className="hidden sm:block">
-                        <p className="text-[10px] text-gray-400 uppercase font-bold">{p.extraLabel}</p>
-                        <p className="text-xs font-bold text-[#14357A]">{p.extraValue}</p>
-                      </div>
-                      <span className={`text-[10px] font-bold px-2 py-1 rounded ${p.statusColor}`}>● {p.status}</span>
-                      <button className={`text-xs font-bold px-3 py-2 rounded-md ${p.actionStyle}`}>
-                        {isPharmacist ? 'Dispense' : p.action}
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
-
         </div>
 
-        {/* RIGHT COLUMN */}
         <div className="space-y-6">
-
-          {/* QUICK ACTIONS */}
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
             <h3 className="font-bold text-[#14357A] mb-4 flex items-center gap-2">
-              <FaHeartbeat className="text-[#F5B041]" /> 
-              {isNurse ? 'Nursing Actions' 
-                : isDoctor ? 'Clinical Actions' 
-                : isPharmacist ? 'Pharmacy Actions' 
-                : 'Quick Actions'}
+              <FaHeartbeat className="text-[#F5B041]" /> Quick Actions
             </h3>
             <div className="space-y-3">
               {getQuickActions().map((action, i) => (
                 <button
                   key={i}
-                  onClick={() => navigate(isPharmacist ? '/pharmacy' : '/appointments')}
+                  onClick={() => navigate(action.to)}
                   className="w-full flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:border-[#14357A]/30 hover:bg-blue-50/50 transition group text-left"
                 >
                   <div className="flex items-center gap-3">
@@ -392,79 +338,34 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* WARD STATUS - hide for pharmacist */}
-          {!isPharmacist && (
-            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-              <div className="flex justify-between items-start mb-6">
-                <h3 className="font-bold text-[#14357A] flex items-center gap-2"><FaBed /> Observation Ward Status</h3>
-                <span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-2 py-1 rounded">5 / 12 Total Beds</span>
-              </div>
-              <div className="space-y-5">
-                <div>
-                  <div className="flex justify-between text-xs font-bold mb-2">
-                    <span className="text-gray-700">Male Observation Ward</span>
-                    <span className="text-[#14357A]">3 / 6 Beds</span>
-                  </div>
-                  <div className="flex gap-1">
-                    {[...Array(6)].map((_, i) => (
-                      <div key={i} className={`h-2 flex-1 rounded-sm ${i < 3 ? 'bg-[#14357A]' : 'bg-blue-100'}`}></div>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs font-bold mb-2">
-                    <span className="text-gray-700">Female Observation Ward</span>
-                    <span className="text-[#14357A]">2 / 6 Beds</span>
-                  </div>
-                  <div className="flex gap-1">
-                    {[...Array(6)].map((_, i) => (
-                      <div key={i} className={`h-2 flex-1 rounded-sm ${i < 2 ? 'bg-[#D9A520]' : 'bg-amber-100'}`}></div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ACTIVITY */}
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
             <h3 className="font-bold text-[#14357A] mb-6 flex items-center gap-2">
-              <FiClock /> {isNurse ? 'My Recent Activity' 
-                : isDoctor ? 'My Recent Consults' 
-                : isPharmacist ? 'Recent Dispensing' 
-                : 'Recent Clinical Activity'}
+              <FiClock /> Recent Activity
             </h3>
 
-            {recentActivity.length === 0 ? (
+            {loading ? (
+              <p className="text-xs text-gray-400 text-center py-4">Loading...</p>
+            ) : activity.length === 0 ? (
               <EmptyState icon={<FiActivity size={24} />} title="No recent activity" description="Events will appear here." />
             ) : (
               <div className="space-y-6 relative">
-                {recentActivity.map((a, idx) => (
-                  <div key={idx} className="relative flex items-start gap-4">
-                    <div className={`w-4 h-4 rounded-full border-4 border-white shadow shrink-0 z-10 mt-0.5 ${a.dotColor}`}></div>
+                {activity.map((a, idx) => (
+                  <div key={a.id || idx} className="relative flex items-start gap-4">
+                    <div className="w-4 h-4 rounded-full border-4 border-white shadow shrink-0 z-10 mt-0.5 bg-[#14357A]"></div>
                     <div>
-                      <p className="text-[10px] font-bold text-gray-400">{a.time}</p>
-                      <p className="text-xs font-bold text-[#14357A]">{a.title}</p>
-                      <p className="text-[10px] text-gray-500">{a.desc}</p>
+                      <p className="text-[10px] font-bold text-gray-400">
+                        {a.timestamp ? new Date(a.timestamp).toLocaleString() : ''}
+                      </p>
+                      <p className="text-xs font-bold text-[#14357A]">{a.type}</p>
+                      <p className="text-[10px] text-gray-500">{a.message}</p>
                     </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
-
         </div>
       </div>
-
-      {/* BOTTOM BANNER */}
-      <div className="bg-blue-50/80 border border-blue-100 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-2">
-        <p className="text-xs text-[#14357A] flex items-center gap-2">
-          <FiAlertCircle /> <span className="font-bold">University Health Advisory:</span>
-          {' '}Mass preventive health screening ongoing for 100L Freshers at Sultan Bello Hall Quadrangle until 16:00 WAT.
-        </p>
-        <p className="text-[10px] font-bold text-gray-500 whitespace-nowrap">Duty Desk: Main Consultation Wing</p>
-      </div>
-
     </div>
   );
 }
